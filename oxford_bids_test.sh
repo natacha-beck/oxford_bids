@@ -112,11 +112,11 @@ subjectDir=$path
 for se in $(ls $subjectDir); do
   if [[ "$se" =~ 'anat' ]] | [[ "$se" =~ 'perf' ]]; then
     cd $subjectDir
-    ls -LR *>output.txt
+    ls -LR * > output.txt
 
-    ps -u | awk '/asl.nii/ {print $1}' output.txt > asl.txt
-    ps -u | awk '/T1w.nii/ {print $1}' output.txt> T1.txt
-    ps -u | awk '/m0scan.nii/ {print $1}' output.txt >m0scan.txt
+    ps -u | awk '/asl.nii/ {print $1}'    output.txt > asl.txt
+    ps -u | awk '/T1w.nii/ {print $1}'    output.txt > T1.txt
+    ps -u | awk '/m0scan.nii/ {print $1}' output.txt > m0scan.txt
 
     ################################################
     # find the number of runs by counting run name #
@@ -125,8 +125,8 @@ for se in $(ls $subjectDir); do
     runNum=$( cat asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
 
     for i in  $(seq 1 ${runNum}); do
-      out=$(grep -i "perf" output.txt)
-      asl=$(grep -i "run-${i}" asl.txt)
+      out=$(grep -i "perf"     output.txt)
+      asl=$(grep -i "run-${i}" asl.txt   )
       if [ -z "$asl" ]; then
         echo Warning: Image ASL in $se and run${i} does not exist!
         continue
@@ -138,8 +138,8 @@ for se in $(ls $subjectDir); do
         continue
       fi
 
-      T1=$(grep -i "run-${i}" T1.txt)
-      T1_onerun=$(grep -i "T1w.nii" T1.txt)
+      T1=$(grep        -i "run-${i}" T1.txt)
+      T1_onerun=$(grep -i "T1w.nii"  T1.txt)
       if [ -z "$T1"] && [ ! -z "$T1_onerun" ]; then
         T1=$T1_onerun
       elif  [ -z "$T1_onerun" ]; then
@@ -152,8 +152,8 @@ for se in $(ls $subjectDir); do
 
       if [[ $mni_reg == "1" ]];then
         fsl_anat -i anat/$T1 -o "run-${i}"
-        ls -LR *>output.txt
-        ps -u | awk '/.anat/ {print $1}' output.txt >anat.txt
+        ls -LR * > output.txt
+        ps -u | awk '/.anat/ {print $1}' output.txt > anat.txt
         anat_path=$(grep -i -m 1 "run-${i}.anat" anat.txt)
 
         oxford_asl -i perf/$asl -o  perf/"run-${i}" --spatial=$spatial $wp_str $mc_str $artoff_str $fixbolus_str --iaf=$iaf --ibf=$ibf --tis $tis $casl_str --bolus $bolus --bat=$bat --t1=$t1 --t1b=$t1b  $slicedt_str $sliceband_str  $rpts_str --fslanat=${anat_path%?} -c perf/$m0 --tr=$TR
@@ -181,11 +181,11 @@ for se in $(ls $subjectDir); do
     ########################################################################################################################################
     elif [[ "$se" =~ 'ses-' ]];then
       cd $subjectDir/$se
-      ls -LR *>output.txt
+      ls -LR * > output.txt
 
-      ps -u | awk '/asl.nii/ {print $1}' output.txt > asl.txt
-      ps -u | awk '/T1w.nii/ {print $1}' output.txt> T1.txt
-      ps -u | awk '/m0scan.nii/ {print $1}' output.txt >m0scan.txt
+      ps -u | awk '/asl.nii/ {print $1}'    output.txt > asl.txt
+      ps -u | awk '/T1w.nii/ {print $1}'    output.txt > T1.txt
+      ps -u | awk '/m0scan.nii/ {print $1}' output.txt > m0scan.txt
       runNum=$( cat asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
 
       for i in  $(seq 1 ${runNum}); do
