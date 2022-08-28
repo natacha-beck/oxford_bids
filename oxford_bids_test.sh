@@ -5,10 +5,7 @@
 #####################
 PARSED_ARGUMENTS=$(getopt -a -n oxford_bids_args -o '' --long  path:,spatial:,wp:,mc:,iaf:,ibf:,tis:,casl:,artoff:,fixbolus:,bolus:,bat:,t1:,t1b:,slicedt:,sliceband:,rpts:,mni_reg:,TR:,pvcorr: -- "$@")
 
-VALID_ARGUMENTS=$?
-if [ "$VALID_ARGUMENTS" != "0" ]; then
-  usage
-fi
+
 
 echo "PARSED_ARGUMENTS is $PARSED_ARGUMENTS"
 eval set -- "$PARSED_ARGUMENTS"
@@ -102,7 +99,9 @@ else
 fi
 
 # Setting working directory equal to the input path #
-subjectDir=$path
+mkdir out_folder
+cp -r  $path/* out_folder
+subjectDir=$(pwd)/out_folder
 
 ################################################################################################################
 # For all folders in working directory check if the folder's name starts with "anat" or "perf,                 #
@@ -110,37 +109,44 @@ subjectDir=$path
 ################################################################################################################
 for se in $(ls $subjectDir); do
   if [[ "$se" =~ 'anat' ]] | [[ "$se" =~ 'perf' ]]; then
-    cd $subjectDir
-    ls -LR * > output.txt
+   
+    ls -LR $subjectDir > $subjectDir/output.txt
 
-    ps -u | awk '/asl.nii/ {print $1}'    output.txt > asl.txt
-    ps -u | awk '/T1w.nii/ {print $1}'    output.txt > T1.txt
-    ps -u | awk '/m0scan.nii/ {print $1}' output.txt > m0scan.txt
+    ps -u | awk '/asl.nii/ {print $1}'    $subjectDir/output.txt >$subjectDir/asl.txt
+    ps -u | awk '/T1w.nii/ {print $1}'    $subjectDir/output.txt > $subjectDir/T1.txt
+    ps -u | awk '/m0scan.nii/ {print $1}' $subjectDir/output.txt > $subjectDir/m0scan.txt
 
     ################################################
     # find the number of runs by counting run name #
     ################################################
 
-    runNum=$( cat asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
+    runNum=$( cat $subjectDir/asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
 
     for i in  $(seq 1 ${runNum}); do
 
-      out=$(grep -i "perf"     output.txt)
-      asl=$(grep -i "run-${i}" asl.txt   )
+      out=$(grep -i "/perf"     $subjectDir/output.txt)
+      asl_file=$(grep -i "run-${i}" $subjectDir/asl.txt)
+      asl=$subjectDir/perf/$asl_file
 
       if [ -z "$asl" ]; then
         echo Warning: Image ASL in $se and run-${i} does not exist!
         continue
       fi
 
-      m0=$( grep -i "run-${i}" m0scan.txt)
+      m0_file=$( grep -i "run-${i}" $subjectDir/m0scan.txt)
+      m0=$subjectDir/perf/$m0_file
+      
   	  if [ -z "$m0" ]; then
         echo Warning: Image m0scans in $se and run-${i} does not exist!
         continue
       fi
 
-      T1=$(grep        -i "run-${i}" T1.txt)
-      T1_onerun=$(grep -i "T1w.nii"  T1.txt)
+      T1_file=$(grep        -i "run-${i}" $subjectDir/T1.txt)
+      T1_onerun_file=$(grep -i "T1w.nii"  $subjectDir/T1.txt)
+      
+      T1=$subjectDir/anat/$T1_file
+      T1_onerun=$subjectDir/anat/$T1_onerun
+      
       if [ -z "$T1" ] && [ ! -z "$T1_onerun" ]; then
         T1=$T1_onerun
       elif  [ -z "$T1_onerun" ]; then
@@ -153,16 +159,17 @@ for se in $(ls $subjectDir); do
 
       if [[ $mni_reg == "1" ]];then
         # Run fsl anat and extract path for oxford_asl
-        fsl_anat -i anat/$T1 -o "run-${i}"
-        ls -LR * > output.txt
+        fsl_anat -i $T1 -o $subjectDir/anat/"run-${i}"
 
-        ps -u | awk '/.anat/ {print $1}' output.txt > anat.txt
+        ls -LR  $subjectDir/anat>  $subjectDir/anat/output.txt
+        ps -u | awk '/.anat/ {print $1}' $subjectDir/anat/output.txt > $subjectDir/anat/anat.txt
 
-        anat_path=$(grep -i -m 1 "run-${i}.anat" anat.txt)
+        anat_path=$(grep -i -m 1 "run-${i}.anat" $subjectDir/anat/anat.txt)
+        anat=$subjectDir/anat/$anat_path
 
         oxford_asl                 \
-          -i perf/$asl             \
-          -o perf/"run-${i}"       \
+          -i $asl                   \
+          -o $subjectDir/perf/"run-${i}"       \
           --spatial=$spatial       \
           $wp_str                  \
           $mc_str                  \
@@ -179,8 +186,8 @@ for se in $(ls $subjectDir); do
           $slicedt_str             \
           $sliceband_str           \
           $rpts_str                \
-          --fslanat=${anat_path%?} \
-          -c perf/$m0              \
+          --fslanat=$anat          \
+          -c  $m0                  \
           --tr=$TR
 
       elif  [[ $mni_reg == "0" ]];then
@@ -188,11 +195,10 @@ for se in $(ls $subjectDir); do
         ########################################################################################
         # if mni_reg=0, two different command lines will be executed depending on T1 existence #
         ########################################################################################
-        if [ ! -z "${asl}" ] && [ ! -z "${T1}" ] && [ ! -z "${m0}" ]; then
-
-          oxford_asl            \
-            -i perf/$asl        \
-            -o perf/"run-${i}"  \
+       cmd_oxford_asl="";
+       cmd_oxford_asl= "oxford_asl            \
+            -i  $asl             \
+            -o  $subjectDir/perf/"run-${i}" \
             --spatial=$spatial  \
             $wp_str             \
             $mc_str             \
@@ -209,35 +215,18 @@ for se in $(ls $subjectDir); do
             $slicedt_str        \
             $sliceband_str      \
             $rpts_str           \
-            -s anat/$T1         \
-            -c perf/$m0         \
-            --tr=$TR
-
-        elif [ ! -z "${asl}" ]  && [ ! -z "${m0}" ]; then
-
-          oxford_asl            \
-            -i perf/$asl        \
-            -o  perf/"run-${i}" \
-            --spatial=$spatial  \
-            $wp_str             \
-            $mc_str             \
-            $artsup_str         \
-            $fixbolus_str       \
-            --iaf=$iaf          \
-            --ibf=$ibf          \
-            --tis $tis          \
-            $casl_str           \
-            --bolus $bolus      \
-            --bat=$bat          \
-            --t1=$t1            \
-            --t1b=$t1b          \
-            $slicedt_str        \
-            $sliceband_str      \
-            $rpts_str           \
-            -c perf/$m0         \
-            --tr=$TR
-
+            -c $m0              \
+            --tr=$TR"
+            
+        if [ ! -z "${T1}" ]  then
+        cmd_oxford_asl="$cmd_oxford_asl -s $T1" 
         fi
+        
+        eval "$cmd_oxford_asl"
+
+
+
+        
       fi
     done
 
@@ -250,31 +239,38 @@ for se in $(ls $subjectDir); do
   # is correct the loop should be executed once, if not, it should be executed for each folder with "ses-"                               #
   ########################################################################################################################################
   elif [[ "$se" =~ 'ses-' ]];then
-    cd $subjectDir/$se
-    ls -LR * > output.txt
+    
+    ls -LR $subjectDir/$se> $subjectDir/$se/output.txt
 
-    ps -u | awk '/asl.nii/ {print $1}'    output.txt > asl.txt
-    ps -u | awk '/T1w.nii/ {print $1}'    output.txt > T1.txt
-    ps -u | awk '/m0scan.nii/ {print $1}' output.txt > m0scan.txt
+    ps -u | awk '/asl.nii/ {print $1}'    $subjectDir/$se/output.txt > $subjectDir/$se/asl.txt
+    ps -u | awk '/T1w.nii/ {print $1}'    $subjectDir/$se/output.txt > $subjectDir/$se/T1.txt
+    ps -u | awk '/m0scan.nii/ {print $1}' $subjectDir/$se/output.txt > $subjectDir/$se/m0scan.txt
 
-    runNum=$( cat asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
+    runNum=$( cat $subjectDir/$se/asl.txt | awk -F "_" '/run/ {print$2}' | wc -l)
 
     for i in  $(seq 1 ${runNum}); do
 
-      asl=$(grep -i "run-${i}" asl.txt)
+      asl_file=$(grep -i "run-${i}" $subjectDir/$se/asl.txt)
+      asl=$subjectDir/$se/perf/$asl_file
+      
       if [ -z "$asl" ]; then
         echo Warning: Image ASL in $se and run${i} does not exist!
         continue
       fi
 
-      m0=$( grep -i "run-${i}" m0scan.txt)
+      m0_file=$( grep -i "run-${i}" $subjectDir/$se/m0scan.txt)
+      m0=$subjectDir/$se/perf/$m0_file
+      
       if [ -z "$m0" ]; then
         echo Warning: Image m0scans in $se and run-${i} does not exist!
         continue
       fi
 
-      T1=$(grep -i "run-${i}" T1.txt)
-      T1_onerun=$(grep -i "T1w.nii" T1.txt)
+      T1_file=$(grep -i "run-${i}" $subjectDir/$se/T1.txt)
+      T1_onerun_file=$(grep -i "T1w.nii" $subjectDir/$se/T1.txt)
+      T1=$subjectDir/$se/anat/$T1_file
+      T1_onerun=$subjectDir/$se/anat/$T1_onerun_file
+      
       if [ -z "$T1" ] && [ ! -z "$T1_onerun" ]; then
         T1=$T1_onerun
       elif  [ -z "$T1_onerun" ]; then
@@ -283,16 +279,17 @@ for se in $(ls $subjectDir); do
 
       # running command line
       if [[ $mni_reg == "1" ]];then
-        fsl_anat -i anat/$T1 -o "run-${i}"
+        fsl_anat -i $T1 -o $subjectDir/$se/anat/"run-${i}"
 
-        ls -LR * > output.txt
-        ps -u | awk '/.anat/ {print $1}' output.txt > anat.txt
+        ls -LR  $subjectDir/$se/anat>  $subjectDir/$se/anat/output.txt
+        ps -u | awk '/.anat/ {print $1}' $subjectDir/$se/anat/output.txt > $subjectDir/$se/anat/anat.txt
 
-        anat_path=$(grep -i -m 1 "run-${i}.anat" anat.txt)
+        anat_path=$(grep -i -m 1 "run-${i}.anat" $subjectDir/$se/anat/anat.txt)
+        anat=$subjectDir/$se/anat/$anat_path
 
         oxford_asl                 \
-          -i perf/$asl             \
-          -o  perf/"run-${i}"      \
+          -i   $asl             \
+          -o  $subjectDir/$se/perf/"run-${i}"      \
           --spatial=$spatial       \
           $wp_str                  \
           $mc_str                  \
@@ -309,16 +306,17 @@ for se in $(ls $subjectDir); do
           $slicedt_str             \
           $sliceband_str           \
           $rpts_str                \
-          --fslanat=${anat_path%?} \
-          -c perf/$m0              \
+          --fslanat=$anat          \
+          -c      $m0              \
           --tr=$TR
 
       elif  [[ $mni_reg == "0" ]];then
-        if [ ! -z "${asl}" ] && [ ! -z "${T1}" ] && [ ! -z "${m0}" ]; then
-
-          oxford_asl            \
-            -i perf/$asl        \
-            -o  perf/"run-${i}" \
+      
+       cmd_oxford_asl="";
+       
+       cmd_oxford_asl= "oxford_asl            \
+            -i  $asl             \
+            -o  $subjectDir/perf/"run-${i}" \
             --spatial=$spatial  \
             $wp_str             \
             $mc_str             \
@@ -335,35 +333,15 @@ for se in $(ls $subjectDir); do
             $slicedt_str        \
             $sliceband_str      \
             $rpts_str           \
-            -s anat/$T1         \
-            -c perf/$m0         \
-            --tr=$TR
-
-        elif [ ! -z "${asl}" ]  && [ ! -z "${m0}" ]; then
-
-          oxford_asl            \
-            -i perf/$asl        \
-            -o perf/"run-${i}"  \
-            --spatial=$spatial  \
-            $wp_str             \
-            $mc_str             \
-            $artsup_str         \
-            $fixbolus_str       \
-            --iaf=$iaf          \
-            --ibf=$ibf          \
-            --tis $tis          \
-            $casl_str           \
-            --bolus $bolus      \
-            --bat=$bat          \
-            --t1=$t1            \
-            --t1b=$t1b          \
-            $slicedt_str        \
-            $sliceband_str      \
-            $rpts_str           \
-            -c perf/$m0         \
-            --tr=$TR
-
+            -c $m0              \
+            --tr=$TR"
+            
+        if [ ! -z "${T1}" ]  then
+        cmd_oxford_asl="$cmd_oxford_asl -s $T1" 
         fi
+        
+        eval "$cmd_oxford_asl"
+        
       fi
     done
   fi
