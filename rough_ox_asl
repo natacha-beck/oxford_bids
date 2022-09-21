@@ -1,0 +1,52 @@
+#!/bin/bash
+
+if test $# -lt 2 ; then
+  echo "Usage: $0 BIDS OUTDIR [oxford_asl options]"
+  exit 2
+fi
+
+bidsdataset="$1"
+deriv_out="$2"
+shift;shift
+
+mkdir -p "$deriv_out" || exit 2
+
+for subjdir in "$bidsdataset"/sub-* ; do
+  subject=$(basename $subjdir)
+  sesslist=$(ls -1f $subjdir | grep '^ses-' | sort)
+  test -z "$sesslist" && sesslist="none"
+
+  for session in $sesslist ; do
+    subdata="$subjdir"
+    test "$session" != 'none' && subdata="$subdata/$session"
+
+    sub_sess="$subject"
+    test "$session" != 'none' && sub_sess="${subject}_${session}"
+
+    t1wfile=($subdata/anat/${sub_sess}*T1w.nii*)
+    aslfile=($subdata/perf/${sub_sess}*asl.nii*)
+    m0file=($subdata/perf/${sub_sess}*m0scan.nii*)
+
+    test -f "$t1wfile" || continue
+    test -f "$aslfile" || continue
+    test -f "$m0file"  || continue
+
+    mkdir -p "$deriv_out/fsl_anat" || exit 2
+    anat_out="$deriv_out/fsl_anat/$sub_sess"
+    fsl_anat -i "$t1wfile" -o "$anat_out" || continue
+    
+    mkdir -p "$deriv_out/oxford_asl" || exit 2
+    oasl_out="$deriv_out/oxford_asl/$sub_sess"
+
+    oxford_asl                   \
+      -i "$aslfile"              \
+      -c "$m0file"               \
+      --fslanat "$anat_out.anat" \
+      -s "$t1file"               \
+      -o "$oasl_out"             \
+      "$@"
+
+  done
+
+done
+

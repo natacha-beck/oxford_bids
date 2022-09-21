@@ -1,0 +1,167 @@
+#!/bin/bash
+
+#
+# This program accepts a BIDS dataset and runs OxfordASL on the subjects that have asl and m0scan files.
+# See the usage statement for more information.
+#
+
+VERSION=0.9
+
+usage() {
+  cat <<USAGE
+This is $0 version $VERSION by Pierre Rioux
+
+Usage: $0 BIDSDATASET OUTPUTDIR [almost any other options of oxford_asl here]
+
+This program has two mandatory arguments:
+
+  * BIDSDATASET is a directory containing a standard BIDS data structure
+
+  * OUTPUTDIR is any output directory of your choice, and will be created
+    as needed. Under it, two subdorectories will be created:
+
+      fsl_anat/
+      oxford_asl/
+
+    and under each, there will be a subdirectory for each BIDS subject,
+    either as "sub-1234" or "sub-1234_ses-abcd" (depending on whether or
+    not the subject contains sessions). Subdirectories under fsl_anat
+    have a ".anat" extensions too, by the way.
+
+The rest of the options are ANY parameters supported by oxford_asl,
+except of course for --fslanat, -i, -o. Supplying these options will
+result in unpredicatble results, as it will confuse the internal
+pipeline.
+USAGE
+  exit 2
+}
+
+die() {
+  echo "$*"
+  echo ""
+  echo "Use $0 -h for help."
+  exit 2
+}
+
+FSL_ANAT_EXE="fsl_anat"
+OXFORD_ASL_EXE="oxford_asl"
+
+# Check basic required args
+test "X$1" = "X-h" && usage
+test $# -lt 2      && usage
+bidsdataset="$1"
+deriv_out="$2"
+shift;shift
+
+# Verify main BIDS input dataset
+test -d "$bidsdataset"                          || die "First argument must be a BIDS directory."
+test -e "$bidsdataset/dataset_description.json" || die "BIDS dataset missing JSON description."
+
+# Prepare output
+mkdir -p "$deriv_out" || die "Cannot create output dir"
+
+echo "$0 $VERSION starting at" `date`
+
+# Scan subjects
+for subjdir in "$bidsdataset"/sub-* ; do
+  test -d "$subjdir" || continue # ignore any non-dir that happens ot start with sub-
+  subject=$(basename $subjdir)
+
+  # Extract list of sessions, or just '.' if there are none
+  sesslist=$(ls -1f $subjdir | grep '^ses-' | sort)
+  test -z "$sesslist" && sesslist="none"
+
+  # Loop through sessions; if there are no sessions, we have a fake
+  # one called 'none'.
+  for session in $sesslist ; do
+    test "$session" != 'none' && ( test -d "$subjdir/$session" || continue ) # ignore any non dir that happens to start with ses-
+
+    # One variable that contains BIDSDATASET/sub-1234 or BIDSDATASET/sub-123/ses-123
+    subdata="$subjdir"
+    test "$session" != 'none' && subdata="$subdata/$session"
+
+    # One variable with "sub-123" or "sub-123_ses-123"
+    sub_sess="$subject"
+    test "$session" != 'none' && sub_sess="${subject}_${session}"
+
+    # Main Banner
+    echo "======================================================="
+    echo " SUBJECT $subject SESSION $session"
+    echo "======================================================="
+    
+    # Bash will leave the values of the expansions below with
+    # the glob characters intact, which will let us detect when the files
+    # are actually missing during the tests below.
+    t1wfile=($subdata/anat/${sub_sess}*T1w.nii*)
+    aslfile=($subdata/perf/${sub_sess}*asl.nii*)
+    m0file=($subdata/perf/${sub_sess}*m0scan.nii*)
+
+    if ! test -f "$t1wfile" ; then
+      echo " -> No T1 file found, skipping. Expected one match in $t1wfile"
+      continue
+    fi
+    if ! test -f "$aslfile" ; then
+      echo " -> No asl file found, skipping. Expected one match in $aslfile"
+      continue
+    fi
+    if ! test -f "$m0file" ; then
+      echo " -> No m0scan file found, skipping. Expected one match in $m0file"
+      continue
+    fi
+
+    echo "-------------------------------------------------------"
+    echo " FSL_ANNAT, SUBJECT $subject SESSION $session"
+    echo "-------------------------------------------------------"
+    mkdir -p "$deriv_out/fsl_anat" || die "Cannot create output dir for fsl_anat ?!?"
+    anat_out="$deriv_out/fsl_anat/$sub_sess" # fsl_anat auto append .anat to this dir
+    anat_log="$deriv_out/fsl_anat/$sub_sess.log"
+    if test -d "$anat_out.anat" ; then
+      echo " -> re-using fsl_anat output in $anat_out.anat"
+      echo " -> (if this output is corrupt, consider deleting it)"
+      fsl_anat_status=0
+    else
+      $FSL_ANAT_EXE -i "$t1wfile" -o "$anat_out" 2>&1 | tee "$anat_log"
+      fsl_anat_status="$?"
+    fi
+
+    if test $fsl_anat_status -ne 0 ; then
+      echo " -> ERROR: fsl_anat failed, see logs in $anat_log"
+      echo " -> Skipping oxford_asl processing"
+      continue
+    fi
+
+    echo "-------------------------------------------------------"
+    echo " OXFORD_ASL, SUBJECT $subject SESSION $session"
+    echo "-------------------------------------------------------"
+    mkdir -p "$deriv_out/oxford_asl" || die "Cannot create output dir for oxford_asl ?!?"
+    oasl_out="$deriv_out/oxford_asl/$sub_sess"
+    oasl_log="$deriv_out/oxford_asl/$sub_sess.log"
+
+    if test -d "$oasl_out" ; then
+      echo " -> re-using oxford_asl output in $oasl_out"
+      echo " -> (if this output is corrupt, consider deleting it)"
+      oasl_status=0
+    else
+      $OXFORD_ASL_EXE              \
+        -i "$aslfile"              \
+        -c "$m0file"               \
+        --fslanat "$anat_out.anat" \
+        -s "$t1file"               \
+        -o "$oasl_out"             \
+        "$@"                       \
+        2>&1 | tee "$oasl_log"
+      oasl_status=$?
+    fi
+
+    if test $oasl_status -ne 0 ; then
+      echo " -> ERROR: oxford_asl failed, see logs in $oasl_log"
+      continue
+    fi
+
+  done # sessions loop
+
+done # subjects loop
+
+echo "$0 ending at" `date`
+    
+      
