@@ -5,7 +5,7 @@
 # See the usage statement for more information.
 #
 
-VERSION=0.9
+VERSION=1.0
 
 usage() {
   cat <<USAGE
@@ -89,79 +89,91 @@ for subjdir in "$bidsdataset"/sub-* ; do
     echo " SUBJECT $subject SESSION $session"
     echo "======================================================="
     
-    # Bash will leave the values of the expansions below with
-    # the glob characters intact, which will let us detect when the files
-    # are actually missing during the tests below.
-    t1wfile=($subdata/anat/${sub_sess}*T1w.nii*)
-    aslfile=($subdata/perf/${sub_sess}*asl.nii*)
-    m0file=($subdata/perf/${sub_sess}*m0scan.nii*)
+    # Find the list of asl files; these will determine which T1s and m0scan
+    # files we also need.
+    aslfiles=${subdata}/perf/${sub_sess}*asl.nii*
 
-    if ! test -f "$t1wfile" ; then
-      echo " -> No T1 file found, skipping. Expected one match in $t1wfile"
-      continue
-    fi
-    if ! test -f "$aslfile" ; then
-      echo " -> No asl file found, skipping. Expected one match in $aslfile"
-      continue
-    fi
-    if ! test -f "$m0file" ; then
-      echo " -> No m0scan file found, skipping. Expected one match in $m0file"
-      continue
-    fi
+    for aslfile in $aslfiles ; do
 
-    echo "-------------------------------------------------------"
-    echo " FSL_ANNAT, SUBJECT $subject SESSION $session"
-    echo "-------------------------------------------------------"
-    mkdir -p "$deriv_out/fsl_anat" || die "Cannot create output dir for fsl_anat ?!?"
-    anat_out="$deriv_out/fsl_anat/$sub_sess" # fsl_anat auto append .anat to this dir
-    anat_log="$deriv_out/fsl_anat/$sub_sess.log"
-    if test -d "$anat_out.anat" ; then
-      echo " -> re-using fsl_anat output in $anat_out.anat"
-      echo " -> (if this output is corrupt, consider deleting it)"
-      fsl_anat_status=0
-    else
-      $FSL_ANAT_EXE -i "$t1wfile" -o "$anat_out" 2>&1 | tee "$anat_log"
-      fsl_anat_status="$?"
-    fi
+      if ! test -f "$aslfile" ; then
+        echo " -> No asl file found, skipping. Expected one match in $aslfile"
+        continue
+      fi
 
-    if test $fsl_anat_status -ne 0 ; then
-      echo " -> ERROR: fsl_anat failed, see logs in $anat_log"
-      echo " -> Skipping oxford_asl processing"
-      continue
-    fi
+      # "BIDS/sub-1/{ses}/perf/{sub}_{ses}_{task}_{run}"
+      perf_prefix=$(echo $aslfile     | sed -e 's#_asl.nii*##')
+      anat_prefix=$(echo $perf_prefix | sed -e 's#/perf/#/anat/#')
 
-    echo "-------------------------------------------------------"
-    echo " OXFORD_ASL, SUBJECT $subject SESSION $session"
-    echo "-------------------------------------------------------"
-    mkdir -p "$deriv_out/oxford_asl" || die "Cannot create output dir for oxford_asl ?!?"
-    oasl_out="$deriv_out/oxford_asl/$sub_sess"
-    oasl_log="$deriv_out/oxford_asl/$sub_sess.log"
+      # Find the matching T1 and m0scan file
+      t1wfile=(${anat_prefix}_T1w.nii*)
+      m0file=(${perf_prefix}_m0scan.nii*)
 
-    if test -d "$oasl_out" ; then
-      echo " -> re-using oxford_asl output in $oasl_out"
-      echo " -> (if this output is corrupt, consider deleting it)"
-      oasl_status=0
-    else
-      $OXFORD_ASL_EXE              \
-        -i "$aslfile"              \
-        -c "$m0file"               \
-        --fslanat "$anat_out.anat" \
-        -s "$t1file"               \
-        -o "$oasl_out"             \
-        "$@"                       \
-        2>&1 | tee "$oasl_log"
-      oasl_status=$?
-    fi
+      # Variable to show sub, ses, task, run etc etc
+      full_context=$(basename $perf_prefix)
 
-    if test $oasl_status -ne 0 ; then
-      echo " -> ERROR: oxford_asl failed, see logs in $oasl_log"
-      continue
-    fi
+      if ! test -f "$t1wfile" ; then
+        echo " -> No T1 file found, skipping. Expected one match in $t1wfile"
+        continue
+      fi
+      if ! test -f "$m0file" ; then
+        echo " -> No m0scan file found, skipping. Expected one match in $m0file"
+        continue
+      fi
+
+      echo "-------------------------------------------------------"
+      echo " FSL_ANNAT, Context=$full_context"
+      echo "-------------------------------------------------------"
+      mkdir -p "$deriv_out/fsl_anat" || die "Cannot create output dir for fsl_anat ?!?"
+      anat_out="$deriv_out/fsl_anat/$full_context" # fsl_anat auto append .anat to this dir
+      anat_log="$deriv_out/fsl_anat/$full_context.log"
+      if test -d "$anat_out.anat" ; then
+        echo " -> re-using fsl_anat output in $anat_out.anat"
+        echo " -> (if this output is corrupt, consider deleting it)"
+        fsl_anat_status=0
+      else
+       $FSL_ANAT_EXE -i "$t1wfile" -o "$anat_out" 2>&1 | tee "$anat_log"
+        fsl_anat_status="$?"
+      fi
+
+      if test $fsl_anat_status -ne 0 ; then
+        echo " -> ERROR: fsl_anat failed, see logs in $anat_log"
+        echo " -> Skipping oxford_asl processing"
+        continue
+      fi
+
+      echo "-------------------------------------------------------"
+      echo " OXFORD_ASL, Context=$full_context"
+      echo "-------------------------------------------------------"
+      mkdir -p "$deriv_out/oxford_asl" || die "Cannot create output dir for oxford_asl ?!?"
+      oasl_out="$deriv_out/oxford_asl/$full_context"
+      oasl_log="$deriv_out/oxford_asl/$full_context.log"
+
+      if test -d "$oasl_out" ; then
+        echo " -> re-using oxford_asl output in $oasl_out"
+        echo " -> (if this output is corrupt, consider deleting it)"
+        oasl_status=0
+      else
+        $OXFORD_ASL_EXE              \
+          -i "$aslfile"              \
+          -c "$m0file"               \
+          --fslanat "$anat_out.anat" \
+          -s "$t1file"               \
+          -o "$oasl_out"             \
+          "$@"                       \
+          2>&1 | tee "$oasl_log"
+        oasl_status=$?
+      fi
+
+      if test $oasl_status -ne 0 ; then
+        echo " -> ERROR: oxford_asl failed, see logs in $oasl_log"
+        continue
+      fi
+
+    done # ASL file loop
 
   done # sessions loop
 
 done # subjects loop
 
 echo "$0 ending at" `date`
-    
-      
+
