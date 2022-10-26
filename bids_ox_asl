@@ -101,7 +101,7 @@ for subjdir in "$bidsdataset"/sub-* ; do
       fi
 
       # "BIDS/sub-1/{ses}/perf/{sub}_{ses}_{task}_{run}"
-      perf_prefix=$(echo $aslfile     | sed -e 's#_asl.nii*##')
+      perf_prefix=$(echo $aslfile     | sed -e 's#_asl.nii.*##')
       anat_prefix=$(echo $perf_prefix | sed -e 's#/perf/#/anat/#')
 
       # Find the matching T1 and m0scan file
